@@ -10,10 +10,11 @@ extern "C" {
 typedef struct srtp_runtime_context srtp_runtime_context;
 /* Call srtp_init() once before use. All operations on a context are exclusive.
  * Profiles: 1 AES_CM_128_HMAC_SHA1_80, 2 AEAD_AES_128_GCM, 3 AEAD_AES_256_GCM.
- * Direction: 1 sender, 2 receiver. Key includes the profile's master salt.
- * Window is an explicit multiple of 32, 64..32736. Encrypted extension IDs
- * must be strictly increasing, 1..255. No MKI or repeated transmission.
- * No pointer in these options is retained after construction. */
+ * Direction: 1 sender, 2 receiver, 3 both with distinct SSRCs. Key includes the
+ * profile's master salt. Window is an explicit multiple of 32, 64..32736.
+ * Encrypted extension IDs must be strictly increasing, 1..255. No MKI or
+ * repeated transmission. No pointer in these options is retained after
+ * construction. */
 typedef struct {
     uint32_t profile;
     uint32_t direction;
@@ -38,13 +39,14 @@ srtp_err_status_t srtp_runtime_restore(const srtp_runtime_options *options,
 srtp_err_status_t srtp_runtime_export(srtp_runtime_context *context,
                                       uint8_t *output, size_t *length);
 void srtp_runtime_free(srtp_runtime_context *context);
-/* rtcp is 0 or 1. Direction selects protect/unprotect. The native library
- * performs packet parsing, authentication, replay checks and index updates.
- * Caller MUST save updated state before wire send or plaintext delivery.
- * After an error, no packet bytes may be exposed. State may have advanced. */
-srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *context, int rtcp,
-                                      uint8_t *packet, size_t capacity,
-                                      size_t *length);
+/* sending and rtcp are 0 or 1. sending selects protect/unprotect. The native
+ * library performs packet parsing, authentication, replay checks and index
+ * updates. Caller MUST save updated state before wire send or plaintext
+ * delivery. After an error, no packet bytes may be exposed. State may have
+ * advanced. */
+srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *context,
+                                      int sending, int rtcp, uint8_t *packet,
+                                      size_t capacity, size_t *length);
 #ifdef __cplusplus
 }
 #endif

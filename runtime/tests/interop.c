@@ -84,7 +84,8 @@ int main(int argc, char **argv) {
         {
             size_t length = (size_t)n, state_length = 0;
             unsigned char *state;
-            assert(srtp_runtime_packet(c, (int)r, b, sizeof(b), &length) == 0);
+            assert(srtp_runtime_packet(c, (int)sending, (int)r, b, sizeof(b),
+                                       &length) == 0);
             n = (int)length;
             assert(srtp_runtime_export(c, NULL, &state_length) == 0);
             state = malloc(state_length);

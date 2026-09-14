@@ -1,7 +1,8 @@
 # Private SRTP state engine
 
 The Runtime uses `srtp_runtime.h`, an exclusive opaque owner of one actual master
-key plus salt, profile, direction and declared header-encryption/replay policy.
+key plus salt, profile, direction and declared header-encryption/replay policy. A bidirectional owner
+keeps both directions in one key lease and rejects an SSRC changing direction.
 Only AES_CM_128_HMAC_SHA1_80 and AEAD_AES_128/256_GCM with full 16-byte GCM tags
 are admitted. No MKI, automatic key changes, ROC resets or repeated transmission.
 

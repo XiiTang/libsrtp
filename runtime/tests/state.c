@@ -80,12 +80,12 @@ static void exercise(uint32_t profile) {
         for (rtcp = 0; rtcp <= 1; rtcp++) {
             pn = an = packet(a, rtcp, ssrc, 65535);
             memcpy(plain, a, pn);
-            OK(srtp_runtime_packet(tx, rtcp, a, sizeof(a), &an));
+            OK(srtp_runtime_packet(tx, 1, rtcp, a, sizeof(a), &an));
             if (ssrc == 1) {
                 memcpy(replay[rtcp], a, an);
                 replay_n[rtcp] = an;
             }
-            OK(srtp_runtime_packet(rx, rtcp, a, sizeof(a), &an));
+            OK(srtp_runtime_packet(rx, 0, rtcp, a, sizeof(a), &an));
             assert(an == pn && !memcmp(a, plain, pn));
         }
     }
@@ -94,7 +94,7 @@ static void exercise(uint32_t profile) {
     for (rtcp = 0; rtcp <= 1; rtcp++) {
         an = replay_n[rtcp];
         memcpy(a, replay[rtcp], an);
-        assert(srtp_runtime_packet(rx2, rtcp, a, sizeof(a), &an) ==
+        assert(srtp_runtime_packet(rx2, 0, rtcp, a, sizeof(a), &an) ==
                srtp_err_status_replay_fail);
     }
     /* Sequence rollover, reordered SSRCs, and future SRTCP indices must be
@@ -105,11 +105,11 @@ static void exercise(uint32_t profile) {
                 pn = an = bn = packet(a, rtcp, ssrc, (uint16_t)seq);
                 memcpy(b, a, an);
                 memcpy(plain, a, an);
-                OK(srtp_runtime_packet(tx, rtcp, a, sizeof(a), &an));
-                OK(srtp_runtime_packet(tx2, rtcp, b, sizeof(b), &bn));
+                OK(srtp_runtime_packet(tx, 1, rtcp, a, sizeof(a), &an));
+                OK(srtp_runtime_packet(tx2, 1, rtcp, b, sizeof(b), &bn));
                 assert(an == bn && !memcmp(a, b, an));
-                OK(srtp_runtime_packet(rx, rtcp, a, sizeof(a), &an));
-                OK(srtp_runtime_packet(rx2, rtcp, b, sizeof(b), &bn));
+                OK(srtp_runtime_packet(rx, 0, rtcp, a, sizeof(a), &an));
+                OK(srtp_runtime_packet(rx2, 0, rtcp, b, sizeof(b), &bn));
                 assert(an == pn && bn == pn && !memcmp(a, plain, pn) &&
                        !memcmp(b, plain, pn));
             }
@@ -121,12 +121,12 @@ static void exercise(uint32_t profile) {
     tx2 = clone(tx, &txo);
     rx2 = clone(rx, &rxo);
     an = packet(a, 0, 1, 179);
-    assert(srtp_runtime_packet(tx2, 0, a, sizeof(a), &an) ==
+    assert(srtp_runtime_packet(tx2, 1, 0, a, sizeof(a), &an) ==
            srtp_err_status_replay_fail);
     for (rtcp = 0; rtcp <= 1; rtcp++) {
         an = replay_n[rtcp];
         memcpy(a, replay[rtcp], an);
-        assert(srtp_runtime_packet(rx2, rtcp, a, sizeof(a), &an) ==
+        assert(srtp_runtime_packet(rx2, 0, rtcp, a, sizeof(a), &an) ==
                srtp_err_status_replay_old);
     }
     srtp_runtime_free(tx);
@@ -146,9 +146,9 @@ static void malformed(void) {
     size_t n, an, i;
     OK(srtp_runtime_create(&o, &c));
     an = packet(a, 0, 1, 10);
-    OK(srtp_runtime_packet(c, 0, a, sizeof(a), &an));
+    OK(srtp_runtime_packet(c, 1, 0, a, sizeof(a), &an));
     an = packet(a, 0, 2, 10);
-    OK(srtp_runtime_packet(c, 0, a, sizeof(a), &an));
+    OK(srtp_runtime_packet(c, 1, 0, a, sizeof(a), &an));
     blob = save(c, &n);
     bad = malloc(n + 1);
     assert(bad);
@@ -196,13 +196,13 @@ static void malformed(void) {
     OK(srtp_runtime_restore(&o, bad, n, &expired));
     for (i = 0; i < 3; i++) {
         an = packet(a, 0, (uint32_t)(i + 1), 11);
-        assert(srtp_runtime_packet(expired, 0, a, sizeof(a), &an) ==
+        assert(srtp_runtime_packet(expired, 1, 0, a, sizeof(a), &an) ==
                srtp_err_status_key_expired);
     }
     srtp_runtime_free(c);
     c = clone(expired, &o);
     an = packet(a, 0, 9, 12);
-    assert(srtp_runtime_packet(c, 0, a, sizeof(a), &an) ==
+    assert(srtp_runtime_packet(c, 1, 0, a, sizeof(a), &an) ==
            srtp_err_status_key_expired);
     srtp_runtime_free(c);
     srtp_runtime_free(expired);
@@ -212,11 +212,53 @@ static void malformed(void) {
     memset(bad + 94, 255, 6);
     OK(srtp_runtime_restore(&o, bad, n, &c));
     an = packet(a, 0, 1, 0);
-    assert(srtp_runtime_packet(c, 0, a, sizeof(a), &an) ==
+    assert(srtp_runtime_packet(c, 1, 0, a, sizeof(a), &an) ==
            srtp_err_status_key_expired);
     srtp_runtime_free(c);
     free(blob);
     free(bad);
+}
+static void duplex(void) {
+    for (uint32_t profile = 1; profile <= 3; profile++) {
+        srtp_runtime_options o = options(profile, 3);
+        srtp_runtime_context *a, *b, *copy;
+        uint8_t packet_bytes[128], original[128];
+        size_t n, plain;
+        OK(srtp_runtime_create(&o, &a));
+        OK(srtp_runtime_create(&o, &b));
+        for (unsigned seq = 65534; seq < 65538; seq++) {
+            for (int rtcp = 0; rtcp <= 1; rtcp++) {
+                for (int direction = 0; direction <= 1; direction++) {
+                    srtp_runtime_context *sender = direction ? a : b;
+                    srtp_runtime_context *receiver = direction ? b : a;
+                    plain = n = packet(packet_bytes, rtcp, direction ? 7 : 8,
+                                       (uint16_t)seq);
+                    memcpy(original, packet_bytes, n);
+                    OK(srtp_runtime_packet(sender, 1, rtcp, packet_bytes,
+                                           sizeof(packet_bytes), &n));
+                    OK(srtp_runtime_packet(receiver, 0, rtcp, packet_bytes,
+                                           sizeof(packet_bytes), &n));
+                    assert(n == plain && !memcmp(original, packet_bytes, n));
+                }
+            }
+            copy = clone(a, &o);
+            srtp_runtime_free(a);
+            a = copy;
+            copy = clone(b, &o);
+            srtp_runtime_free(b);
+            b = copy;
+        }
+        /* Same actual key may be bidirectional, but an SSRC cannot switch
+         * direction and reuse an existing key/index pair. */
+        n = packet(packet_bytes, 0, 8, 20);
+        assert(srtp_runtime_packet(a, 1, 0, packet_bytes, sizeof(packet_bytes),
+                                   &n) == srtp_err_status_bad_param);
+        n = packet(packet_bytes, 0, 7, 20);
+        assert(srtp_runtime_packet(a, 0, 0, packet_bytes, sizeof(packet_bytes),
+                                   &n) == srtp_err_status_bad_param);
+        srtp_runtime_free(a);
+        srtp_runtime_free(b);
+    }
 }
 int main(void) {
     size_t i;
@@ -227,6 +269,7 @@ int main(void) {
     exercise(2);
     exercise(3);
     malformed();
+    duplex();
     OK(srtp_shutdown());
     puts("SRTP state: all profiles, rollover, multi-SSRC, RTP/SRTCP replay, "
          "malformed state, key exhaustion passed");

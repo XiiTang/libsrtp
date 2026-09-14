@@ -53,7 +53,7 @@ srtp_err_status_t srtp_runtime_create(const srtp_runtime_options *o,
         return srtp_err_status_bad_param;
     *out = NULL;
     if (!o || !o->key || o->profile < 1 || o->profile > 3 || o->direction < 1 ||
-        o->direction > 2 || o->replay_window < 64 ||
+        o->direction > 3 || o->replay_window < 64 ||
         o->replay_window >= 32768 || o->replay_window % 32 ||
         o->encrypted_extension_count > 255 ||
         (o->encrypted_extension_count && !o->encrypted_extensions))
@@ -95,6 +95,8 @@ srtp_err_status_t srtp_runtime_create(const srtp_runtime_options *o,
         srtp_runtime_free(c);
         return srtp_err_status_init_fail;
     }
+    if (o->direction == 3)
+        c->session->stream_template->direction = dir_unknown;
     c->profile = o->profile;
     c->direction = o->direction;
     c->window = o->replay_window;
@@ -252,9 +254,13 @@ srtp_err_status_t srtp_runtime_restore(const srtp_runtime_options *o,
         s->rtp_rdbx.index = get64(&p);
         s->pending_roc = get32(&p);
         s->rtcp_rdb.window_start = get32(&p);
-        if (get32(&p) != c->direction || s->rtp_rdbx.index > MAX_INDEX ||
-            s->pending_roc != 0 || s->rtcp_rdb.window_start > 0x7fffffff)
+        uint32_t stream_direction = get32(&p);
+        if (stream_direction < 1 || stream_direction > 2 ||
+            (c->direction != 3 && stream_direction != c->direction) ||
+            s->rtp_rdbx.index > MAX_INDEX || s->pending_roc != 0 ||
+            s->rtcp_rdb.window_start > 0x7fffffff)
             goto invalid;
+        s->direction = (direction_t)stream_direction;
         for (j = 0; j < 4; j++)
             s->rtcp_rdb.bitmask.v32[j] = get32(&p);
         for (j = 0; j < c->window / 32; j++)
@@ -267,7 +273,7 @@ srtp_err_status_t srtp_runtime_restore(const srtp_runtime_options *o,
                 goto invalid;
         for (j = 0; j < 128; j++)
             if (v128_get_bit(&s->rtcp_rdb.bitmask, j) &&
-                (c->direction == 1 ||
+                (s->direction == dir_srtp_sender ||
                  (uint64_t)s->rtcp_rdb.window_start + j > 0x7fffffff))
                 goto invalid;
     }
@@ -277,17 +283,26 @@ invalid:
     srtp_runtime_free(c);
     return srtp_err_status_bad_param;
 }
-srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *c, int rtcp,
-                                      uint8_t *packet, size_t capacity,
-                                      size_t *length) {
+srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *c, int sending,
+                                      int rtcp, uint8_t *packet,
+                                      size_t capacity, size_t *length) {
     srtp_err_status_t status;
     int n;
     uint32_t trailer;
     if (!c || !packet || !length || *length > capacity || *length > INT_MAX ||
         (rtcp != 0 && rtcp != 1))
         return srtp_err_status_bad_param;
+    if ((sending != 0 && sending != 1) || (c->direction == 1 && !sending) ||
+        (c->direction == 2 && sending) || *length < (rtcp ? 8u : 12u))
+        return srtp_err_status_bad_param;
+    uint32_t ssrc;
+    memcpy(&ssrc, packet + (rtcp ? 4 : 8), sizeof(ssrc));
+    srtp_stream_t stream = srtp_stream_list_get(c->session->stream_list, ssrc);
+    if (stream &&
+        stream->direction != (sending ? dir_srtp_sender : dir_srtp_receiver))
+        return srtp_err_status_bad_param;
     n = (int)*length;
-    if (c->direction == 1) {
+    if (sending) {
         status =
             rtcp ? srtp_get_protect_rtcp_trailer_length(c->session, 0, 0,
                                                         &trailer)
@@ -302,6 +317,8 @@ srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *c, int rtcp,
         status = rtcp ? srtp_unprotect_rtcp(c->session, packet, &n)
                       : srtp_unprotect(c->session, packet, &n);
     }
+    if (c->direction == 3)
+        c->session->stream_template->direction = dir_unknown;
     if (!status)
         *length = (size_t)n;
     return status;
@@ -330,9 +347,11 @@ srtp_err_status_t srtp_runtime_export(srtp_runtime_context *c, uint8_t *b,
     return srtp_err_status_no_such_op;
 }
 void srtp_runtime_free(srtp_runtime_context *c) { (void)c; }
-srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *c, int r,
-                                      uint8_t *b, size_t cap, size_t *n) {
+srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *c, int sending,
+                                      int r, uint8_t *b, size_t cap,
+                                      size_t *n) {
     (void)c;
+    (void)sending;
     (void)r;
     (void)b;
     (void)cap;
