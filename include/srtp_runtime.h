@@ -27,6 +27,11 @@ typedef struct {
 
 srtp_err_status_t srtp_runtime_create(const srtp_runtime_options *options,
                                       srtp_runtime_context **out);
+/* Fresh DTLS exporter context, never exportable/restorable. Enforces the
+ * profile-specific per-key RTP and SRTCP usage limits across all SSRCs.
+ * A DTLS write key has exactly one direction; Both is rejected. */
+srtp_err_status_t srtp_runtime_create_dtls(const srtp_runtime_options *options,
+                                           srtp_runtime_context **out);
 /* Import constructs a new context atomically. Keys and every policy field
  * must match. Blob is not authenticated: caller MUST authenticate/encrypt it,
  * prevent rollback/reset/concurrent key leases and fail closed if absent. */

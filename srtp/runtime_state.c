@@ -18,6 +18,8 @@ struct srtp_runtime_context {
     srtp_t session;
     uint32_t profile, direction, window, extension_count;
     uint8_t key_id[SHA256_DIGEST_LENGTH];
+    int dtls;
+    uint64_t dtls_used[2];
 };
 static void put32(uint8_t **p, uint32_t v) {
     (*p)[0] = v >> 24;
@@ -104,6 +106,15 @@ srtp_err_status_t srtp_runtime_create(const srtp_runtime_options *o,
     *out = c;
     return srtp_err_status_ok;
 }
+srtp_err_status_t srtp_runtime_create_dtls(const srtp_runtime_options *options,
+                                           srtp_runtime_context **out) {
+    if (!out) return srtp_err_status_bad_param;
+    *out = NULL;
+    if (!options || options->direction == 3) return srtp_err_status_bad_param;
+    srtp_err_status_t status = srtp_runtime_create(options, out);
+    if (!status) (*out)->dtls = 1;
+    return status;
+}
 void srtp_runtime_free(srtp_runtime_context *c) {
     if (!c)
         return;
@@ -139,7 +150,7 @@ srtp_err_status_t srtp_runtime_export(srtp_runtime_context *c, uint8_t *output,
     size_t needed, record, i, j;
     uint8_t *p = output;
     srtp_stream_t t;
-    if (!c || !length)
+    if (!c || !length || c->dtls)
         return srtp_err_status_bad_param;
     t = c->session->stream_template;
     srtp_stream_list_for_each(c->session->stream_list, count_stream, &a);
@@ -295,6 +306,11 @@ srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *c, int sending,
     if ((sending != 0 && sending != 1) || (c->direction == 1 && !sending) ||
         (c->direction == 2 && sending) || *length < (rtcp ? 8u : 12u))
         return srtp_err_status_bad_param;
+    /* RFC 5764 section 4.1.2 / RFC 7714 section 14.2. Separate derivation
+     * labels give RTP and SRTCP separate limits, shared across every SSRC. */
+    if (c->dtls && c->dtls_used[rtcp] >=
+        (UINT64_C(1) << (rtcp || c->profile == 1 ? 31 : 48)))
+        return srtp_err_status_key_expired;
     uint32_t ssrc;
     memcpy(&ssrc, packet + (rtcp ? 4 : 8), sizeof(ssrc));
     srtp_stream_t stream = srtp_stream_list_get(c->session->stream_list, ssrc);
@@ -319,8 +335,10 @@ srtp_err_status_t srtp_runtime_packet(srtp_runtime_context *c, int sending,
     }
     if (c->direction == 3)
         c->session->stream_template->direction = dir_unknown;
-    if (!status)
+    if (!status) {
         *length = (size_t)n;
+        if (c->dtls) c->dtls_used[rtcp]++;
+    }
     return status;
 }
 #else
@@ -331,6 +349,10 @@ srtp_err_status_t srtp_runtime_create(const srtp_runtime_options *o,
     if (c)
         *c = NULL;
     return srtp_err_status_no_such_op;
+}
+srtp_err_status_t srtp_runtime_create_dtls(const srtp_runtime_options *o,
+                                           srtp_runtime_context **c) {
+    return srtp_runtime_create(o, c);
 }
 srtp_err_status_t srtp_runtime_restore(const srtp_runtime_options *o,
                                        const uint8_t *b, size_t n,
