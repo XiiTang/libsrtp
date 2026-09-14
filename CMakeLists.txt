@@ -135,6 +135,7 @@ endif()
 
 set(SOURCES_C
   srtp/srtp.c
+  srtp/runtime_state.c
 )
 
 set(CIPHERS_SOURCES_C
@@ -302,7 +303,7 @@ install(TARGETS srtp2 DESTINATION lib
   EXPORT libSRTPTargets
 )
 
-install(FILES include/srtp.h crypto/include/auth.h
+install(FILES include/srtp.h include/srtp_runtime.h crypto/include/auth.h
   crypto/include/cipher.h
   crypto/include/crypto_types.h
   DESTINATION include/srtp2)
@@ -511,3 +512,9 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/libSRTPConfigVersion.cmake
   DESTINATION lib/cmake/libSRTP
 )
+
+if(LIBSRTP_TEST_APPS AND ENABLE_OPENSSL)
+  add_executable(runtime_state_test runtime/tests/state.c)
+  target_link_libraries(runtime_state_test srtp2)
+  add_test(NAME runtime_state COMMAND runtime_state_test)
+endif()

@@ -186,6 +186,7 @@ endif
 
 sources = files(
   'srtp/srtp.c',
+  'srtp/runtime_state.c',
   )
 
 ciphers_sources = files(
@@ -259,6 +260,7 @@ replay_sources = files(
 
 public_headers = files(
   'include/srtp.h',
+  'include/srtp_runtime.h',
   'crypto/include/auth.h',
   'crypto/include/cipher.h',
   'crypto/include/crypto_types.h',

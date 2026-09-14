@@ -76,3 +76,9 @@ srtp_replace_auth_type
 srtp_octet_string_hex_string
 srtp_octet_string_is_eq
 srtp_rdbx_get_window_size
+
+srtp_runtime_create
+srtp_runtime_restore
+srtp_runtime_export
+srtp_runtime_free
+srtp_runtime_packet

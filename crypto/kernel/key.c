@@ -79,6 +79,11 @@ srtp_err_status_t srtp_key_limit_clone(srtp_key_limit_t original,
 
 srtp_key_event_t srtp_key_limit_update(srtp_key_limit_t key)
 {
+    /* Exhaustion is terminal, including after importing a saved context. */
+    if (key->state == srtp_key_state_expired || key->num_left == 0) {
+        key->state = srtp_key_state_expired;
+        return srtp_key_event_hard_limit;
+    }
 #ifdef NO_64BIT_MATH
     if (low32(key->num_left) == 0) {
         // carry
@@ -102,7 +107,7 @@ srtp_key_event_t srtp_key_limit_update(srtp_key_limit_t key)
         key->state = srtp_key_state_past_soft_limit;
     }
 #ifdef NO_64BIT_MATH
-    if (low32(key->num_left) == 0 && high32(key->num_left == 0))
+    if (low32(key->num_left) == 0 && high32(key->num_left) == 0)
 #else
     if (key->num_left < 1)
 #endif

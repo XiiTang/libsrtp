@@ -115,6 +115,10 @@ void srtp_stream_list_for_each(srtp_stream_list_t list,
                                int (*callback)(srtp_stream_t, void *),
                                void *data);
 
+/* Only for the versioned runtime state importer. */
+srtp_err_status_t srtp_runtime_clone_stream(srtp_t session, uint32_t ssrc,
+                                           srtp_stream_t *stream);
+
 #ifdef __cplusplus
 }
 #endif

@@ -622,6 +622,25 @@ static srtp_err_status_t srtp_stream_clone(
     return srtp_err_status_ok;
 }
 
+/* Private state importer: clone into a new, unpublished context only. */
+srtp_err_status_t srtp_runtime_clone_stream(srtp_t session, uint32_t ssrc,
+                                           srtp_stream_t *stream)
+{
+    srtp_err_status_t status;
+    if (!session || !session->stream_template ||
+        srtp_stream_list_get(session->stream_list, ssrc))
+        return srtp_err_status_bad_param;
+    status = srtp_stream_clone(session->stream_template, ssrc, stream);
+    if (status != srtp_err_status_ok)
+        return status;
+    status = srtp_stream_list_insert(session->stream_list, *stream);
+    if (status != srtp_err_status_ok) {
+        srtp_stream_dealloc(*stream, session->stream_template);
+        *stream = NULL;
+    }
+    return status;
+}
+
 /*
  * key derivation functions, internal to libSRTP
  *
@@ -1798,6 +1817,13 @@ static srtp_err_status_t srtp_get_est_pkt_index(const srtp_hdr_t *hdr,
         /* estimate packet index from seq. num. in header */
         *delta =
             srtp_rdbx_estimate_index(&stream->rtp_rdbx, est, ntohs(hdr->seq));
+        /* ROC is 32 bits. Never wrap the 48-bit packet index and reuse an
+         * encryption nonce, even if skipped sequence numbers mean the key's
+         * packet-use counter has not yet expired. */
+        if (*delta > 0 && *est < stream->rtp_rdbx.index)
+            return srtp_err_status_key_expired;
+        if (*delta < 0 && *est > stream->rtp_rdbx.index)
+            return srtp_err_status_replay_old;
     }
 
 #ifdef NO_64BIT_MATH
